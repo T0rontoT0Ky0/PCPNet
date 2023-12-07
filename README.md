@@ -1,6 +1,7 @@
 
 # PCPNet
-
+This repository is a work of reproducing of the PCPNet's single_scale network.
+![image](https://github.com/T0rontoT0Ky0/PCPNet/blob/main/Image/single_scale.PNG)
 ## Python Files Description
 
 This project includes the following Python files:
