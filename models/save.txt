@@ -1,1 +1,3 @@
-save your models form dowanloading
+This folder is saving your own models form dowanloading.
+I have already put my own traning models and parameters in this folder, you can just download it and use those models and parameters to run 'Evaluate.py'
+if you wanna the pre-processing model from the author, please cllick 'http://geometry.cs.ucl.ac.uk/projects/2018/pcpnet/models.zip' or move to the author's repository.
