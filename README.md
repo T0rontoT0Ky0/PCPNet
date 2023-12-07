@@ -15,7 +15,7 @@ This project includes the following Python files:
 
 ## Training Steps
 
-To train and evaluate using this project, follow these steps:
+After downlaoding the datasey, you can train and evaluate using this project following these steps:
 
 1. **Start Training**:
     - Run `python Train.py` to start training.
