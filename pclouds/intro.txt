@@ -1,0 +1,2 @@
+This is a folder for dataset. I just put the 'testset_no_noise.txt' in it in order to implement 'Vision.py' correctly.
+What's more,if you wanna download the whole dataset of the papers, please click 'http://geometry.cs.ucl.ac.uk/projects/2018/pcpnet/pclouds.zip' or move to the author's repository.
