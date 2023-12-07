@@ -1,0 +1,1 @@
+This folder is the output of 'Evaluate.py'.I put my own results on it including both normals and curvature.
