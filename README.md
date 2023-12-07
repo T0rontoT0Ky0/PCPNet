@@ -30,7 +30,9 @@ After downlaoding the datasey, you can train and evaluate using this project fol
 3. **Visualization**:
     - Run `Vision.py` for visualization.
     - Remember to select the correct path you want to visualize in the function(The path I put in the `Vision.py` has already told the file you should choose to visualize the training model. However the path is just an example, you must choose your path of those file!).
-
+![image](https://github.com/T0rontoT0Ky0/PCPNet/blob/main/Image/pipe100k_input.png)
+![image](https://github.com/T0rontoT0Ky0/PCPNet/blob/main/Image/pipe100k_normals.png)
+![image](https://github.com/T0rontoT0Ky0/PCPNet/blob/main/Image/pipe100k_curvature.png)
 
 # Note
 
