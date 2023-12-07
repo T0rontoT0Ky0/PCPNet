@@ -9,9 +9,9 @@ import utils
 
 
 class STN(nn.Module):
-    def __init__(self, num_scales=1, num_points=500, dim=3, sym_op='max', quaternion =False):
+    def __init__(self, num_scales=1, num_points=500, dim=3, sym_op='max'):
         super(STN, self).__init__()
-        self.quaternion = quaternion
+
         self.dim = dim
         self.sym_op = sym_op
         self.num_scales = num_scales
@@ -24,10 +24,8 @@ class STN(nn.Module):
 
         self.fc1 = nn.Linear(1024, 512)
         self.fc2 = nn.Linear(512, 256)
-        if not quaternion:
-            self.fc3 = nn.Linear(256, self.dim*self.dim)
-        else:
-            self.fc3 = nn.Linear(256, 4)
+        self.fc3 = nn.Linear(256, self.dim*self.dim)
+
         self.bn1 = nn.BatchNorm1d(64)
         self.bn2 = nn.BatchNorm1d(128)
         self.bn3 = nn.BatchNorm1d(1024)
@@ -49,10 +47,7 @@ class STN(nn.Module):
         if self.num_scales == 1:
             x = self.mp1(x)
         else:
-            if x.is_cuda:
-                x_scales = Variable(torch.cuda.FloatTensor(x.size(0), 1024*self.num_scales, 1))
-            else:
-                x_scales = Variable(torch.FloatTensor(x.size(0), 1024*self.num_scales, 1))
+            x_scales = x.new_empty(x.size(0), 1024*self.num_scales, 1)
             for s in range(self.num_scales):
                 x_scales[:, s*1024:(s+1)*1024, :] = self.mp1(x[:, :, s*self.num_points:(s+1)*self.num_points])
             x = x_scales
@@ -66,26 +61,69 @@ class STN(nn.Module):
         x = F.relu(self.bn5(self.fc2(x)))
         x = self.fc3(x)
 
-        if not self.quaternion:
-            iden = Variable(torch.from_numpy(np.identity(self.dim, 'float32')).clone()).view(1, self.dim*self.dim).repeat(batchsize, 1)
+        iden = torch.eye(self.dim, dtype=x.dtype, device=x.device).view(1, self.dim*self.dim).repeat(batchsize, 1)
+        x = x + iden
+        x = x.view(-1, self.dim, self.dim)
+        return x
 
-            if x.is_cuda:
-                iden = iden.cuda()
-            x = x + iden
-            x = x.view(-1, self.dim, self.dim)
+class QSTN(nn.Module):
+    def __init__(self, num_scales=1, num_points=500, dim=3, sym_op='max'):
+        super(QSTN, self).__init__()
+
+        self.dim = dim
+        self.sym_op = sym_op
+        self.num_scales = num_scales
+        self.num_points = num_points
+
+        self.conv1 = torch.nn.Conv1d(self.dim, 64, 1)
+        self.conv2 = torch.nn.Conv1d(64, 128, 1)
+        self.conv3 = torch.nn.Conv1d(128, 1024, 1)
+        self.mp1 = torch.nn.MaxPool1d(num_points)
+        self.fc1 = nn.Linear(1024, 512)
+        self.fc2 = nn.Linear(512, 256)
+        self.fc3 = nn.Linear(256, 4)
+
+        self.bn1 = nn.BatchNorm1d(64)
+        self.bn2 = nn.BatchNorm1d(128)
+        self.bn3 = nn.BatchNorm1d(1024)
+        self.bn4 = nn.BatchNorm1d(512)
+        self.bn5 = nn.BatchNorm1d(256)
+
+        if self.num_scales > 1:
+            self.fc0 = nn.Linear(1024*self.num_scales, 1024)
+            self.bn0 = nn.BatchNorm1d(1024)
+
+    def forward(self, x):
+        batchsize = x.size()[0]
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
+
+        # symmetric operation over all points
+        if self.num_scales == 1:
+            x = self.mp1(x)
         else:
-            # add identity quaternion (so the network can output 0 to leave the point cloud identical)
-            iden = Variable(torch.FloatTensor([1, 0, 0, 0]))
-            if x.is_cuda:
-                iden = iden.cuda()
-            x = x + iden
+            x_scales = x.new_empty(x.size(0), 1024*self.num_scales, 1)
+            for s in range(self.num_scales):
+                x_scales[:, s*1024:(s+1)*1024, :] = self.mp1(x[:, :, s*self.num_points:(s+1)*self.num_points])
+            x = x_scales
 
-            # convert quaternion to rotation matrix
-            if x.is_cuda:
-                trans = Variable(torch.cuda.FloatTensor(batchsize, 3, 3))
-            else:
-                trans = Variable(torch.FloatTensor(batchsize, 3, 3))
-            x = utils.batch_quat_to_rotmat(x, trans)
+        x = x.view(-1, 1024*self.num_scales)
+
+        if self.num_scales > 1:
+            x = F.relu(self.bn0(self.fc0(x)))
+
+        x = F.relu(self.bn4(self.fc1(x)))
+        x = F.relu(self.bn5(self.fc2(x)))
+        x = self.fc3(x)
+
+        # add identity quaternion (so the network can output 0 to leave the point cloud identical)
+        iden = x.new_tensor([1, 0, 0, 0])
+        x = x + iden
+
+        # convert quaternion to rotation matrix
+        x = utils.batch_quat_to_rotmat(x)
+
         return x
 
 
@@ -102,21 +140,13 @@ class Feature(nn.Module):
 
         if self.use_point_stn:
             # self.stn1 = STN(num_scales=self.num_scales, num_points=num_points, dim=3, sym_op=self.sym_op)
-            self.stn1 = STN(num_scales=self.num_scales, num_points=num_points*self.point_tuple, dim=3, sym_op=self.sym_op, quaternion = True)
+            self.stn1 = QSTN(num_scales=self.num_scales, num_points=num_points*self.point_tuple, dim=3, sym_op=self.sym_op)
 
         if self.use_feat_stn:
             self.stn2 = STN(num_scales=self.num_scales, num_points=num_points, dim=64, sym_op=self.sym_op)
 
         self.conv0a = torch.nn.Conv1d(3*self.point_tuple, 64, 1)
         self.conv0b = torch.nn.Conv1d(64, 64, 1)
-
-        # TODO remove
-        # self.conv0c = torch.nn.Conv1d(64, 64, 1)
-        # self.bn0c = nn.BatchNorm1d(64)
-        # self.conv1b = torch.nn.Conv1d(64, 64, 1)
-        # self.bn1b = nn.BatchNorm1d(64)
-
-
         self.bn0a = nn.BatchNorm1d(64)
         self.bn0b = nn.BatchNorm1d(64)
         self.conv1 = torch.nn.Conv1d(64, 64, 1)
@@ -154,8 +184,6 @@ class Feature(nn.Module):
         # mlp (64,64)
         x = F.relu(self.bn0a(self.conv0a(x)))
         x = F.relu(self.bn0b(self.conv0b(x)))
-        # TODO remove
-        #x = F.relu(self.bn0c(self.conv0c(x)))
 
         # feature transform
         if self.use_feat_stn:
@@ -168,9 +196,6 @@ class Feature(nn.Module):
 
         # mlp (64,128,1024)
         x = F.relu(self.bn1(self.conv1(x)))
-        # TODO remove
-        #x = F.relu(self.bn1b(self.conv1b(x)))
-
         x = F.relu(self.bn2(self.conv2(x)))
         x = self.bn3(self.conv3(x))
 
@@ -193,10 +218,7 @@ class Feature(nn.Module):
                 raise ValueError('Unsupported symmetric operation: %s' % (self.sym_op))
 
         else:
-            if x.is_cuda:
-                x_scales = Variable(torch.cuda.FloatTensor(x.size(0), 1024*self.num_scales**2, 1))
-            else:
-                x_scales = Variable(torch.FloatTensor(x.size(0), 1024*self.num_scales**2, 1))
+            x_scales = x.new_empty(x.size(0), 1024*self.num_scales**2, 1)
             if self.sym_op == 'max':
                 for s in range(self.num_scales):
                     x_scales[:, s*self.num_scales*1024:(s+1)*self.num_scales*1024, :] = self.mp1(x[:, :, s*self.num_points:(s+1)*self.num_points])
@@ -210,6 +232,8 @@ class Feature(nn.Module):
         x = x.view(-1, 1024*self.num_scales**2)
 
         return x, trans, trans2, pointfvals
+
+
 class PCPNet(nn.Module):
     def __init__(self, num_points=500, output_dim=3, use_point_stn=True, use_feat_stn=True, sym_op='max', get_pointfvals=False, point_tuple=1):
         super(PCPNet, self).__init__()
@@ -224,27 +248,19 @@ class PCPNet(nn.Module):
             get_pointfvals=get_pointfvals,
             point_tuple=point_tuple)
         self.fc1 = nn.Linear(1024, 512)
-        #self.fc_new = nn.Linear(512, 512)
         self.fc2 = nn.Linear(512, 256)
         self.fc3 = nn.Linear(256, output_dim)
         self.bn1 = nn.BatchNorm1d(512)
-        #self.bn_new = nn.BatchNorm1d(512)
-
         self.bn2 = nn.BatchNorm1d(256)
         self.do1 = nn.Dropout(p=0.3)
-        #self.do_new = nn.Dropout(p=0.3)
-
         self.do2 = nn.Dropout(p=0.3)
     def forward(self, x):
         x, trans, trans2, pointfvals = self.feat(x)
         x = F.relu(self.bn1(self.fc1(x)))
         x = self.do1(x)
-
-        # x = F.relu(self.bn_new(self.fc_new(x)))
-        #x = self.do_new(x)
-
         x = F.relu(self.bn2(self.fc2(x)))
         x = self.do2(x)
         x = self.fc3(x)
 
         return x, trans, trans2, pointfvals
+
